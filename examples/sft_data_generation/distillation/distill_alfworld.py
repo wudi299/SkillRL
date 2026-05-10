@@ -11,25 +11,16 @@ Pipeline:
        history (last `H` pairs), then "You are now at step K and your
        current observation is: ...", then the admissible-actions list and
        the standard reasoning instruction.
-    d. **Append a synthetic terminal turn** so the agent can be supervised
-       to emit `done`. The turn's observation reuses the env response to
-       the winning action (which the env actually emitted before
-       terminating); its admissible-actions list is sampled from the
-       winning step's admissible with `done` injected at a random
-       position.
+    d. Append a synthetic terminal turn whose observation reuses the env
+       response to the winning action and whose admissible-actions list
+       is sampled from the winning step's admissible with `done` injected
+       at a random position.
     e. Call o3 ONCE per trajectory with the full step list and ask it to
        generate `<think>...</think>` reasoning for each turn. The action
        strings are taken verbatim from the trajectory (so action validity
        is guaranteed).
 3. Write the distilled trajectories as a list of ShareGPT-formatted
    entries to `--output_file`.
-
-Why we add the `done` step: ALFWorld terminates immediately at the
-winning action and emits `done=True`. The original rollout never has a
-step where `done` is in `admissible_commands`. Without the synthetic
-step, the SFT'd agent would never learn to emit `done` and would keep
-acting indefinitely after solving the task. This was the source of
-confusion in https://github.com/aiming-lab/SkillRL/issues/27.
 
 Trajectory schema assumption (from stage 2):
     parsed_steps[0]: {"step_id": "Step -1", "action": None,

@@ -42,27 +42,6 @@ bash run_alfworld.sh   # or run_webshop.sh / run_search.sh
 | Skill categories | 6 task types (pick / clean / heat / cool / examine / two-obj) | 3 (general / apparel / electronics) | 2 (direct_retrieval / multi_hop) |
 | Postprocess validation | not needed | normalize action vocabulary | not needed |
 
-### The synthetic `done` step (ALFWorld only)
-
-ALFWorld terminates immediately at the winning action and emits
-`done=True`, so a vanilla rollout never has a step where `done` is in
-`admissible_commands`. Without an extra step, the SFT'd agent would
-never learn to emit `done` and would keep acting after solving the
-task.
-
-Between rollout and distillation we extend each winning trajectory by
-one synthetic terminal step:
-
-- The new step's observation reuses the env response from the winning
-  action (e.g. `"You put the object down successfully."`).
-- `done` is added to `admissible_actions` alongside other plausible
-  actions sampled from the prior step's admissible list.
-- There is no real env interaction for this step — it's a constructed
-  terminal frame so the model can be supervised to emit `done`.
-
-WebShop and Search don't need this — their winning actions terminate
-the env naturally.
-
 ## Input rollout txt format (ALFWorld / WebShop)
 
 The parsers expect one .txt per rollout, organized as:
