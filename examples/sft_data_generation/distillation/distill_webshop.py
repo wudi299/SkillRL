@@ -37,7 +37,11 @@ import sys
 from openai import OpenAI
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from skill_retrieval import format_skills_block, load_skill_bank  # noqa: E402
+from skill_retrieval import (  # noqa: E402
+    classify_webshop_category,
+    format_skills_block,
+    load_skill_bank,
+)
 
 WEBSHOP_SYSTEM_TEMPLATE = """You are an expert autonomous agent operating in the WebShop e-commerce environment.
 Your task is to: {task}
@@ -71,26 +75,6 @@ Return a JSON list with one entry per step, in order:
 }
 
 Output ONLY the JSON. No preamble, no markdown fences."""
-
-
-def infer_webshop_category(task: str) -> str:
-    """Heuristic category inference from the WebShop task string.
-
-    The released SFT data has three skill variants: general,
-    Apparel-specific, Electronics-specific. We do simple keyword matching;
-    real production retrieval used embedding similarity.
-    """
-    task_l = task.lower()
-    apparel_kw = ["shirt", "pant", "jeans", "dress", "shoe", "sock", "jacket", "coat", "hat"]
-    electronics_kw = [
-        "phone", "laptop", "tablet", "headphone", "earbud", "battery",
-        "charger", "speaker", "camera",
-    ]
-    if any(kw in task_l for kw in apparel_kw):
-        return "apparel"
-    if any(kw in task_l for kw in electronics_kw):
-        return "electronics"
-    return "general"
 
 
 def build_history_block(parsed_steps, k, max_history):
@@ -161,7 +145,7 @@ def call_o3(client, model, task, skills_block, steps_summary):
 
 
 def distill_one(client, model, task, parsed_steps, skill_bank, max_history):
-    category = infer_webshop_category(task)
+    category = classify_webshop_category(task)
     skills_block = format_skills_block(skill_bank, env="webshop", category=category)
     system_prompt = WEBSHOP_SYSTEM_TEMPLATE.format(task=task, skills_block=skills_block)
 
