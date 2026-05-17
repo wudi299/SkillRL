@@ -697,6 +697,10 @@ class RayPPOTrainer:
         sample_inputs = []
         sample_outputs = []
         sample_scores = []
+        # sample_outputs/sample_scores are per-step-entry (multi_turn_loop emits one row
+        # per active step), but sample_inputs is per-trajectory. We collect the per-step
+        # traj_uid alongside so the skill-update path can dedupe to trajectory granularity.
+        sample_traj_uids = []
 
         for test_data in self.val_dataloader:
             test_batch = DataProto.from_single_dict(test_data)
@@ -767,6 +771,9 @@ class RayPPOTrainer:
             reward_tensor = result["reward_tensor"]
             scores = reward_tensor.sum(-1).cpu().tolist()
             sample_scores.extend(scores)
+            sample_traj_uids.extend(
+                test_output_gen_batch.non_tensor_batch['traj_uid'].tolist()
+            )
 
             reward_tensor_lst.append(reward_tensor)
             data_source_lst.append(test_batch.non_tensor_batch.get('data_source', ['unknown'] * reward_tensor.shape[0]))
@@ -826,10 +833,22 @@ class RayPPOTrainer:
         # Update skill bank from validation results when train-based update is disabled.
         if (self.config.env.get('skills_only_memory', {}).get('enable_dynamic_update', False)
                 and not self.config.env.get('skills_only_memory', {}).get('update_skills_from_train', False)):
+            # Dedupe outputs/scores from per-step-entry to per-trajectory using
+            # first-occurrence of traj_uid, so they align with sample_inputs (which is
+            # already per-trajectory) before failure filtering.
+            seen_uids = set()
+            per_traj_outputs, per_traj_scores = [], []
+            for uid, out, sc in zip(sample_traj_uids, sample_outputs, sample_scores):
+                if uid in seen_uids:
+                    continue
+                seen_uids.add(uid)
+                per_traj_outputs.append(out)
+                per_traj_scores.append(sc)
+
             self._update_skills_from_validation(
                 sample_inputs=sample_inputs,
-                sample_outputs=sample_outputs,
-                sample_scores=sample_scores,
+                sample_outputs=per_traj_outputs,
+                sample_scores=per_traj_scores,
                 success_rate=success_rate,
             )
 
