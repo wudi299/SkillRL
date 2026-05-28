@@ -29,6 +29,7 @@ verl is fast with:
    :caption: Quickstart
 
    start/install
+   start/nogpu_server_prep
    start/quickstart
    start/multinode
    start/ray_debug_tutorial
