@@ -11,7 +11,8 @@ set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-/root/autodl-tmp/SkillRL}"
 DATA_DIR="${DATA_DIR:-/root/autodl-tmp/skillrl-data}"
-CONDA_ENV_PREFIX="${CONDA_ENV_PREFIX:-/root/autodl-tmp/envs/skillrl}"
+CONDA_ENVS_DIR="${CONDA_ENVS_DIR:-/root/autodl-tmp/envs}"
+CONDA_ENV_PREFIX="${CONDA_ENV_PREFIX:-${CONDA_ENVS_DIR}/skillrl}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.10}"
 TORCH_VERSION="${TORCH_VERSION:-2.6.0}"
 TORCH_CUDA_INDEX="${TORCH_CUDA_INDEX:-https://download.pytorch.org/whl/cu124}"
@@ -19,6 +20,7 @@ VLLM_VERSION="${VLLM_VERSION:-0.11.0}"
 FLASH_ATTN_VERSION="${FLASH_ATTN_VERSION:-2.7.4.post1}"
 MAX_JOBS="${MAX_JOBS:-8}"
 INSTALL_GPU_DEPS="${INSTALL_GPU_DEPS:-auto}"
+REGISTER_CONDA_ENV_NAME="${REGISTER_CONDA_ENV_NAME:-1}"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -39,7 +41,9 @@ Modes:
 Useful overrides:
   REPO_DIR=/root/autodl-tmp/SkillRL
   DATA_DIR=/root/autodl-tmp/skillrl-data
+  CONDA_ENVS_DIR=/root/autodl-tmp/envs
   CONDA_ENV_PREFIX=/root/autodl-tmp/envs/skillrl
+  REGISTER_CONDA_ENV_NAME=1  Register envs_dir so 'conda activate skillrl' works.
   INSTALL_GPU_DEPS=1       Force vLLM and flash-attn install.
   INSTALL_GPU_DEPS=0       Skip vLLM and flash-attn.
   VLLM_VERSION=0.11.0
@@ -59,11 +63,27 @@ load_conda() {
   fi
 }
 
+register_conda_envs_dir() {
+  case "${REGISTER_CONDA_ENV_NAME}" in
+    1|true|TRUE|yes|YES|on|ON)
+      local envs_dir
+      envs_dir="$(dirname "${CONDA_ENV_PREFIX}")"
+      if ! conda config --show envs_dirs | grep -Fq "${envs_dir}"; then
+        log "Registering Conda envs_dir: ${envs_dir}"
+        conda config --append envs_dirs "${envs_dir}" >/dev/null
+      fi
+      ;;
+  esac
+}
+
 write_env_file() {
   mkdir -p "${DATA_DIR}/hf-cache"
   cat > "${DATA_DIR}/env.sh" <<EOF
 export SKILLRL_REPO_DIR="${REPO_DIR}"
 export SKILLRL_DATA_DIR="${DATA_DIR}"
+export SKILLRL_CONDA_ENVS_DIR="${CONDA_ENVS_DIR}"
+export SKILLRL_CONDA_ENV_PREFIX="${CONDA_ENV_PREFIX}"
+export SKILLRL_CONDA_ENV_NAME="$(basename "${CONDA_ENV_PREFIX}")"
 export HF_HOME="${DATA_DIR}/hf-cache"
 export HUGGINGFACE_HUB_CACHE="${DATA_DIR}/hf-cache/hub"
 export TRANSFORMERS_CACHE="${DATA_DIR}/hf-cache/transformers"
@@ -75,6 +95,7 @@ EOF
 
 activate_env() {
   load_conda
+  register_conda_envs_dir
   if [ ! -d "${CONDA_ENV_PREFIX}" ]; then
     log "Creating Conda environment: ${CONDA_ENV_PREFIX}"
     conda create -p "${CONDA_ENV_PREFIX}" "python=${PYTHON_VERSION}" -y

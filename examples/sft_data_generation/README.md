@@ -39,6 +39,16 @@ For the local-GitHub-AutoDL workflow, use the auditable runner first. It keeps
 each intermediate artifact under one run directory and writes a Chinese report
 with samples from every stage.
 
+On the H800 instance, first sync code and prepare the full environment:
+
+```bash
+cd /root/autodl-tmp/SkillRL
+bash scripts/autodl_h800_workflow.sh all
+```
+
+This command installs the full GPU environment and verifies imports. It does
+not call teacher models by default.
+
 ```bash
 cd /root/autodl-tmp/SkillRL
 source /root/miniconda3/etc/profile.d/conda.sh
@@ -50,6 +60,12 @@ export ROLLOUT_DIR=/root/autodl-tmp/skillrl-data/rollouts/alfworld
 export WORK_DIR=/root/autodl-tmp/skillrl-runs/alfworld_smoke_001
 
 LIMIT=3 TRACE_LLM=1 bash scripts/run_alfworld_audit_pipeline.sh
+```
+
+The same smoke run can also be launched through the AutoDL wrapper:
+
+```bash
+LIMIT=1 TRACE_LLM=1 bash scripts/autodl_h800_workflow.sh smoke
 ```
 
 Key outputs:
@@ -72,6 +88,18 @@ ${WORK_DIR}/skillrl_run_alfworld_smoke_001.tar.gz
 
 Set `TRACE_LLM=0` to skip full prompt/response traces. Trace files never store
 API keys, but they do store prompts and model outputs, so keep them out of Git.
+
+Parameter defaults for the first AutoDL pass:
+
+| Parameter | Default | When to change |
+|---|---:|---|
+| `LIMIT` | `1` through the wrapper, `3` in the raw runner | Increase to `3` and `10` after the first successful smoke test |
+| `TRACE_LLM` | `1` | Set to `0` only when prompt/response traces are not needed |
+| `WORK_DIR` | `/root/autodl-tmp/skillrl-runs/alfworld_smoke_001` | Use a new directory name for every experiment |
+| `MAX_JOBS` | `8` | Use `4` if `flash-attn` compilation is memory-heavy |
+| `MEMORY_MODEL` | `gpt-4o` | Override only for cost or latency testing |
+| `AGGREGATE_MODEL` | `gpt-4o` | Override only for cost or latency testing |
+| `DISTILL_MODEL` | `o3` | Override only after the baseline smoke run works |
 
 ## Per-environment differences
 
