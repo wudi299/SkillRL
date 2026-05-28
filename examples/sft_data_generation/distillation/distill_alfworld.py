@@ -52,6 +52,8 @@ import sys
 from openai import OpenAI
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from audit_utils import JsonlTraceLogger, truthy  # noqa: E402
 from skill_retrieval import classify_alfworld_task, format_skills_block, load_skill_bank  # noqa: E402
 
 ALFWORLD_SYSTEM_TEMPLATE = """You are an expert agent operating in the ALFRED Embodied Environment.
@@ -210,28 +212,55 @@ def call_o3_for_reasoning(
     task: str,
     skills_block: str,
     steps_summary: list[dict],
+    trace_logger: JsonlTraceLogger | None = None,
+    metadata: dict | None = None,
 ) -> list[dict]:
     user_payload = {
         "task": task,
         "retrieved_skills": skills_block,
         "steps": steps_summary,
     }
+    messages = [
+        {"role": "system", "content": REASONING_PROMPT},
+        {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+    ]
     resp = client.chat.completions.create(
         model=model,
-        messages=[
-            {"role": "system", "content": REASONING_PROMPT},
-            {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-        ],
+        messages=messages,
     )
     text = resp.choices[0].message.content
     text = re.sub(r"^```json\s*|\s*```$", "", text.strip(), flags=re.MULTILINE)
     try:
-        return json.loads(text)
+        parsed = json.loads(text)
     except json.JSONDecodeError:
         m = re.search(r"\[.*\]", text, re.DOTALL)
         if m:
-            return json.loads(m.group(0))
-        raise
+            parsed = json.loads(m.group(0))
+        else:
+            if trace_logger:
+                trace_logger.log(
+                    stage="distillation.reasoning",
+                    model=model,
+                    messages=messages,
+                    payload=user_payload,
+                    raw_response=text,
+                    usage=getattr(resp, "usage", None),
+                    error="LLM did not return valid JSON.",
+                    metadata=metadata,
+                )
+            raise
+    if trace_logger:
+        trace_logger.log(
+            stage="distillation.reasoning",
+            model=model,
+            messages=messages,
+            payload=user_payload,
+            raw_response=text,
+            parsed=parsed,
+            usage=getattr(resp, "usage", None),
+            metadata=metadata,
+        )
+    return parsed
 
 
 def distill_one(
@@ -242,13 +271,23 @@ def distill_one(
     skill_bank: dict,
     max_history: int,
     rng: random.Random,
+    trace_logger: JsonlTraceLogger | None = None,
+    metadata: dict | None = None,
 ) -> dict:
     category = classify_alfworld_task(task)
     skills_block = format_skills_block(skill_bank, env="alfworld", category=category)
     system_prompt = ALFWORLD_SYSTEM_TEMPLATE.format(task=task, skills_block=skills_block)
 
     convs, summary = build_conversation(parsed_steps, max_history, rng)
-    reasonings = call_o3_for_reasoning(client, model, task, skills_block, summary)
+    reasonings = call_o3_for_reasoning(
+        client,
+        model,
+        task,
+        skills_block,
+        summary,
+        trace_logger=trace_logger,
+        metadata={**(metadata or {}), "task": task, "task_type": category, "num_steps": len(summary)},
+    )
     reason_by_idx = {int(r["step_index"]): r["think"] for r in reasonings}
 
     for c in convs:
@@ -286,6 +325,8 @@ def main():
     parser.add_argument(
         "--limit", type=int, default=None, help="Distill at most N trajectories (for testing)"
     )
+    parser.add_argument("--artifact_dir", default=None, help="Optional stage artifact directory.")
+    parser.add_argument("--trace_llm", action="store_true", help="Write full LLM traces to artifact_dir/llm_calls.jsonl.")
     args = parser.parse_args()
 
     api_key = os.environ.get("OPENAI_API_KEY")
@@ -295,6 +336,11 @@ def main():
 
     rng = random.Random(args.seed)
     skill_bank = load_skill_bank(args.skill_bank_file)
+    trace_path = None
+    if args.artifact_dir:
+        os.makedirs(args.artifact_dir, exist_ok=True)
+        trace_path = os.path.join(args.artifact_dir, "llm_calls.jsonl")
+    trace_logger = JsonlTraceLogger(trace_path, enabled=args.trace_llm or truthy(os.environ.get("TRACE_LLM", "0")))
 
     with open(args.input_file, "r", encoding="utf-8") as f:
         envs = json.load(f)
@@ -310,7 +356,15 @@ def main():
                 continue
             try:
                 entry = distill_one(
-                    client, args.model, task, steps, skill_bank, args.max_history, rng
+                    client,
+                    args.model,
+                    task,
+                    steps,
+                    skill_bank,
+                    args.max_history,
+                    rng,
+                    trace_logger=trace_logger,
+                    metadata={"origin_env_id": env.get("env_id"), "trajectory_index": n_processed},
                 )
                 distilled.append(entry)
                 n_processed += 1

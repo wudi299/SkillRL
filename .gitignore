@@ -1,0 +1,41 @@
+# Local data and caches
+skillrl-data/
+data/
+datasets/
+hf-cache/
+.cache/
+cache/
+
+# Experiment and training outputs
+runs/
+outputs/
+checkpoints/
+wandb/
+logs/
+tf-logs/
+skillrl-runs/
+
+# Model and checkpoint files
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+*.onnx
+
+# Dataset and index files
+*.parquet
+*.jsonl
+*.jsonl.gz
+*.index
+*.faiss
+*.tar.gz
+
+# Local AutoDL helpers
+autodl_sync.sh
+
+# Python and local environments
+__pycache__/
+*.pyc
+.venv/
+envs/

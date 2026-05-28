@@ -24,9 +24,13 @@ import argparse
 import json
 import os
 import re
+import sys
 import uuid
 
 from openai import OpenAI
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from audit_utils import JsonlTraceLogger, truthy  # noqa: E402
 
 PRICE_INPUT = 0.00125 / 1000
 PRICE_OUTPUT = 0.0100 / 1000
@@ -118,42 +122,86 @@ def extract_json(text):
 
 
 class MemoryGenerator:
-    def __init__(self, client, model_name):
+    def __init__(self, client, model_name, trace_logger=None):
         self.client = client
         self.model = model_name
         self.input_tokens = 0
         self.output_tokens = 0
+        self.trace_logger = trace_logger or JsonlTraceLogger()
 
-    def _run(self, system_prompt, user_content):
+    def _run(self, stage, system_prompt, user_content, parser=None, metadata=None):
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ]
         try:
             resp = self.client.chat.completions.create(
                 model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content},
-                ],
+                messages=messages,
                 temperature=0,
             )
-            self.input_tokens += resp.usage.prompt_tokens
-            self.output_tokens += resp.usage.completion_tokens
-            return resp.choices[0].message.content
+            usage = getattr(resp, "usage", None)
+            if usage:
+                self.input_tokens += usage.prompt_tokens or 0
+                self.output_tokens += usage.completion_tokens or 0
+            text = resp.choices[0].message.content
+            parsed = parser(text) if parser else text
+            self.trace_logger.log(
+                stage=stage,
+                model=self.model,
+                messages=messages,
+                raw_response=text,
+                parsed=parsed,
+                usage=usage,
+                metadata=metadata,
+            )
+            return parsed
         except Exception as e:
             print(f"LLM error: {e}")
+            self.trace_logger.log(
+                stage=stage,
+                model=self.model,
+                messages=messages,
+                error=str(e),
+                metadata=metadata,
+            )
             return None
 
-    def create(self, env, goal, outcome, raw_traj_str):
+    def create(self, env, goal, outcome, raw_traj_str, metadata=None):
         ctx = (
             f"**Input Data:**\nEnvironment: {env}\nGoal: {goal}\n"
             f"Outcome: {outcome}\nRaw Trajectory:\n{raw_traj_str}"
         )
+        metadata = metadata or {}
 
-        description = (self._run(PROMPTS["contextual_description"], ctx) or "").strip().strip('"')
+        description = (
+            self._run(
+                "memory.contextual_description",
+                PROMPTS["contextual_description"],
+                ctx,
+                parser=lambda text: (text or "").strip().strip('"'),
+                metadata=metadata,
+            )
+            or ""
+        )
 
         refined = None
         if outcome.lower() == "success":
-            refined = extract_json(self._run(PROMPTS["refined_trajectory"], ctx))
+            refined = self._run(
+                "memory.refined_trajectory",
+                PROMPTS["refined_trajectory"],
+                ctx,
+                parser=extract_json,
+                metadata=metadata,
+            )
 
-        strategic = extract_json(self._run(PROMPTS["strategic_guidelines_alfworld"], ctx))
+        strategic = self._run(
+            "memory.strategic_guidelines",
+            PROMPTS["strategic_guidelines_alfworld"],
+            ctx,
+            parser=extract_json,
+            metadata=metadata,
+        )
 
         return {
             "memory_id": f"mem_{env.lower()}_{uuid.uuid4().hex[:8]}",
@@ -178,6 +226,8 @@ def main():
         action="store_true",
         help="Generate one memory per trajectory (default: only the first per env).",
     )
+    parser.add_argument("--artifact_dir", default=None, help="Optional stage artifact directory.")
+    parser.add_argument("--trace_llm", action="store_true", help="Write full LLM traces to artifact_dir/llm_calls.jsonl.")
     args = parser.parse_args()
 
     api_key = os.environ.get("OPENAI_API_KEY")
@@ -188,7 +238,12 @@ def main():
     with open(args.input_file, "r", encoding="utf-8") as f:
         entries = json.load(f)
 
-    gen = MemoryGenerator(client, args.model)
+    trace_path = None
+    if args.artifact_dir:
+        os.makedirs(args.artifact_dir, exist_ok=True)
+        trace_path = os.path.join(args.artifact_dir, "llm_calls.jsonl")
+    trace_logger = JsonlTraceLogger(trace_path, enabled=args.trace_llm or truthy(os.environ.get("TRACE_LLM", "0")))
+    gen = MemoryGenerator(client, args.model, trace_logger=trace_logger)
     memories = []
 
     for entry in entries:
@@ -199,8 +254,15 @@ def main():
 
         for idx, steps in enumerate(trajs):
             try:
-                mem = gen.create(args.env_name, goal, outcome, trajectory_to_string(steps))
+                mem = gen.create(
+                    args.env_name,
+                    goal,
+                    outcome,
+                    trajectory_to_string(steps),
+                    metadata={"origin_env_id": env_id, "trajectory_index": idx, "goal": goal, "outcome": outcome},
+                )
                 mem["origin_env_id"] = env_id
+                mem["origin_trajectory_index"] = idx
                 memories.append(mem)
                 print(f"[{env_id} traj {idx}] [{outcome}] OK")
             except Exception as e:

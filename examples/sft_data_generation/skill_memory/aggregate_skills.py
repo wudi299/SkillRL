@@ -46,8 +46,12 @@ import argparse
 import json
 import os
 import re
+import sys
 
 from openai import OpenAI
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from audit_utils import JsonlTraceLogger, truthy  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Category sets — kept aligned with `skill_generation/{alfworld,webshop,search}.py`
@@ -168,24 +172,57 @@ Constraints:
 # LLM call + JSON parsing
 # ---------------------------------------------------------------------------
 
-def call_llm(client: OpenAI, model: str, system_prompt: str, user_payload: dict) -> list:
+def call_llm(
+    client: OpenAI,
+    model: str,
+    system_prompt: str,
+    user_payload: dict,
+    trace_logger: JsonlTraceLogger | None = None,
+    stage: str = "aggregate.unknown",
+    metadata: dict | None = None,
+) -> list:
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+    ]
     resp = client.chat.completions.create(
         model=model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-        ],
+        messages=messages,
         temperature=0,
     )
     text = resp.choices[0].message.content
     text = re.sub(r"^```json\s*|\s*```$", "", text.strip(), flags=re.MULTILINE)
     try:
-        return json.loads(text)
+        parsed = json.loads(text)
     except json.JSONDecodeError:
         m = re.search(r"\[.*\]", text, re.DOTALL)
         if m:
-            return json.loads(m.group(0))
-        raise ValueError(f"LLM did not return valid JSON: {text[:300]}")
+            parsed = json.loads(m.group(0))
+        else:
+            if trace_logger:
+                trace_logger.log(
+                    stage=stage,
+                    model=model,
+                    messages=messages,
+                    payload=user_payload,
+                    raw_response=text,
+                    usage=getattr(resp, "usage", None),
+                    error=f"LLM did not return valid JSON: {text[:300]}",
+                    metadata=metadata,
+                )
+            raise ValueError(f"LLM did not return valid JSON: {text[:300]}")
+    if trace_logger:
+        trace_logger.log(
+            stage=stage,
+            model=model,
+            messages=messages,
+            payload=user_payload,
+            raw_response=text,
+            parsed=parsed,
+            usage=getattr(resp, "usage", None),
+            metadata=metadata,
+        )
+    return parsed
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +374,7 @@ ENV_CONFIG = {
 }
 
 
-def aggregate(memories: list[dict], env: str, client: OpenAI, model: str) -> dict:
+def aggregate(memories: list[dict], env: str, client: OpenAI, model: str, trace_logger=None) -> dict:
     cfg = ENV_CONFIG[env]
     successes = [m for m in memories if m.get("tags", {}).get("outcome") == "Success"]
     failures = [m for m in memories if m.get("tags", {}).get("outcome") == "Failure"]
@@ -349,7 +386,15 @@ def aggregate(memories: list[dict], env: str, client: OpenAI, model: str) -> dic
         for m in successes
     ]
     all_patterns = [p for p in all_patterns if p]
-    general = call_llm(client, model, GENERAL_PRINCIPLES_PROMPT, {"planning_patterns": all_patterns})
+    general = call_llm(
+        client,
+        model,
+        GENERAL_PRINCIPLES_PROMPT,
+        {"planning_patterns": all_patterns},
+        trace_logger=trace_logger,
+        stage="aggregate.general_skills",
+        metadata={"env": env, "pattern_count": len(all_patterns)},
+    )
     general = _assign_skill_ids(general, prefix="gen")
 
     # ---- Per-category skills -------------------------------------------
@@ -375,7 +420,15 @@ def aggregate(memories: list[dict], env: str, client: OpenAI, model: str) -> dic
             label = cat.replace("_", " ").title()
         print(f"  [{cat}] aggregating from {len(patterns)} memories...")
         prompt = CATEGORY_SKILLS_PROMPT.format(category_label=label)
-        skills = call_llm(client, model, prompt, {"planning_patterns": patterns})
+        skills = call_llm(
+            client,
+            model,
+            prompt,
+            {"planning_patterns": patterns},
+            trace_logger=trace_logger,
+            stage="aggregate.category_skills",
+            metadata={"env": env, "category": cat, "pattern_count": len(patterns)},
+        )
         category_skills[cat] = _assign_skill_ids(skills, prefix=_id_prefix(cat))
 
     # ---- Common mistakes -----------------------------------------------
@@ -386,7 +439,15 @@ def aggregate(memories: list[dict], env: str, client: OpenAI, model: str) -> dic
         for mis in sg.get("mistakes_to_avoid", []) or []:
             all_mistakes.append(mis)
     if all_mistakes:
-        mistakes = call_llm(client, model, MISTAKES_PROMPT, {"mistakes": all_mistakes})
+        mistakes = call_llm(
+            client,
+            model,
+            MISTAKES_PROMPT,
+            {"mistakes": all_mistakes},
+            trace_logger=trace_logger,
+            stage="aggregate.common_mistakes",
+            metadata={"env": env, "mistake_count": len(all_mistakes)},
+        )
         mistakes = _assign_mistake_ids(mistakes)
     else:
         mistakes = []
@@ -404,6 +465,8 @@ def main():
     parser.add_argument("--output_file", required=True)
     parser.add_argument("--env", choices=["alfworld", "webshop", "search"], required=True)
     parser.add_argument("--model", default="gpt-4o")
+    parser.add_argument("--artifact_dir", default=None, help="Optional stage artifact directory.")
+    parser.add_argument("--trace_llm", action="store_true", help="Write full LLM traces to artifact_dir/llm_calls.jsonl.")
     args = parser.parse_args()
 
     api_key = os.environ.get("OPENAI_API_KEY")
@@ -414,7 +477,13 @@ def main():
     with open(args.input_file, "r", encoding="utf-8") as f:
         memories = json.load(f)
 
-    skill_bank = aggregate(memories, args.env, client, args.model)
+    trace_path = None
+    if args.artifact_dir:
+        os.makedirs(args.artifact_dir, exist_ok=True)
+        trace_path = os.path.join(args.artifact_dir, "llm_calls.jsonl")
+    trace_logger = JsonlTraceLogger(trace_path, enabled=args.trace_llm or truthy(os.environ.get("TRACE_LLM", "0")))
+
+    skill_bank = aggregate(memories, args.env, client, args.model, trace_logger=trace_logger)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output_file)) or ".", exist_ok=True)
     with open(args.output_file, "w", encoding="utf-8") as f:

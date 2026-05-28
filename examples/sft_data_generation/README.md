@@ -33,6 +33,46 @@ export WORK_DIR=/path/to/output
 bash run_alfworld.sh   # or run_webshop.sh / run_search.sh
 ```
 
+## Auditable ALFWorld smoke run
+
+For the local-GitHub-AutoDL workflow, use the auditable runner first. It keeps
+each intermediate artifact under one run directory and writes a Chinese report
+with samples from every stage.
+
+```bash
+cd /root/autodl-tmp/SkillRL
+source /root/miniconda3/etc/profile.d/conda.sh
+conda activate skillrl
+source /root/autodl-tmp/skillrl-data/env.sh
+
+export OPENAI_API_KEY=...
+export ROLLOUT_DIR=/root/autodl-tmp/skillrl-data/rollouts/alfworld
+export WORK_DIR=/root/autodl-tmp/skillrl-runs/alfworld_smoke_001
+
+LIMIT=3 TRACE_LLM=1 bash scripts/run_alfworld_audit_pipeline.sh
+```
+
+Key outputs:
+
+```
+${WORK_DIR}/manifest.json
+${WORK_DIR}/00_raw_rollouts/selected_files.json
+${WORK_DIR}/01_processed/processed_trajectories_cleaned.json
+${WORK_DIR}/02_memory/generated_memories.json
+${WORK_DIR}/02_memory/llm_calls.jsonl
+${WORK_DIR}/03_skill_bank/skill_bank.json
+${WORK_DIR}/03_skill_bank/general_skills.json
+${WORK_DIR}/03_skill_bank/task_specific_skills.json
+${WORK_DIR}/04_distillation/distilled_trajectories.json
+${WORK_DIR}/04_distillation/llm_calls.jsonl
+${WORK_DIR}/05_sft_data/alfworld_sft_data.json
+${WORK_DIR}/06_report/summary.md
+${WORK_DIR}/skillrl_run_alfworld_smoke_001.tar.gz
+```
+
+Set `TRACE_LLM=0` to skip full prompt/response traces. Trace files never store
+API keys, but they do store prompts and model outputs, so keep them out of Git.
+
 ## Per-environment differences
 
 | | ALFWorld | WebShop | Search |
