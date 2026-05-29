@@ -97,6 +97,7 @@ Parameter defaults for the first AutoDL pass:
 | `TRACE_LLM` | `1` | Set to `0` only when prompt/response traces are not needed |
 | `WORK_DIR` | `/root/autodl-tmp/skillrl-runs/alfworld_smoke_001` | Use a new directory name for every experiment |
 | `MAX_JOBS` | `8` | Use `4` if `flash-attn` compilation is memory-heavy |
+| `FLASH_ATTN_REQUIRED` | `1` | Set to `0` to continue when GitHub release downloads for flash-attn fail |
 | `MEMORY_MODEL` | `gpt-4o` | Override only for cost or latency testing |
 | `AGGREGATE_MODEL` | `gpt-4o` | Override only for cost or latency testing |
 | `DISTILL_MODEL` | `o3` | Override only after the baseline smoke run works |

@@ -54,6 +54,8 @@ Useful tuning knobs:
   ``/root/autodl-tmp/skillrl-runs/alfworld_smoke_002``.
 - ``MAX_JOBS=4`` if ``flash-attn`` compilation is too slow or memory-heavy;
   otherwise keep the default ``MAX_JOBS=8``.
+- ``FLASH_ATTN_REQUIRED=0`` if GitHub release downloads are unstable and you
+  need to finish the rest of the environment first.
 
 No-GPU Instance
 ---------------
@@ -120,6 +122,7 @@ Notes
 - Prefer at least 100 GB data disk for full WebShop, Search index, and model
   caches.
 - If ``vllm==0.11.0`` conflicts with PyTorch or CUDA on the selected image,
-  keep the error output and fall back to a version matching the image.
+  keep the error output and use the repository-tested default
+  ``vllm==0.8.5.post1`` with ``torch==2.6.0`` and CUDA 12.4.
 - Keep ``/root/autodl-tmp/skillrl-runs`` out of Git. Download only the
   generated ``skillrl_run_*.tar.gz`` package when collecting results.

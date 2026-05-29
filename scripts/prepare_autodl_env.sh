@@ -15,9 +15,14 @@ CONDA_ENVS_DIR="${CONDA_ENVS_DIR:-/root/autodl-tmp/envs}"
 CONDA_ENV_PREFIX="${CONDA_ENV_PREFIX:-${CONDA_ENVS_DIR}/skillrl}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.10}"
 TORCH_VERSION="${TORCH_VERSION:-2.6.0}"
+TORCHVISION_VERSION="${TORCHVISION_VERSION:-0.21.0}"
+TORCHAUDIO_VERSION="${TORCHAUDIO_VERSION:-2.6.0}"
 TORCH_CUDA_INDEX="${TORCH_CUDA_INDEX:-https://download.pytorch.org/whl/cu124}"
-VLLM_VERSION="${VLLM_VERSION:-0.11.0}"
+VLLM_VERSION="${VLLM_VERSION:-0.8.5.post1}"
 FLASH_ATTN_VERSION="${FLASH_ATTN_VERSION:-2.7.4.post1}"
+FLASH_ATTN_WHEEL_URL="${FLASH_ATTN_WHEEL_URL:-https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl}"
+INSTALL_FLASH_ATTN="${INSTALL_FLASH_ATTN:-1}"
+FLASH_ATTN_REQUIRED="${FLASH_ATTN_REQUIRED:-1}"
 MAX_JOBS="${MAX_JOBS:-8}"
 INSTALL_GPU_DEPS="${INSTALL_GPU_DEPS:-auto}"
 REGISTER_CONDA_ENV_NAME="${REGISTER_CONDA_ENV_NAME:-1}"
@@ -46,7 +51,9 @@ Useful overrides:
   REGISTER_CONDA_ENV_NAME=1  Register envs_dir so 'conda activate skillrl' works.
   INSTALL_GPU_DEPS=1       Force vLLM and flash-attn install.
   INSTALL_GPU_DEPS=0       Skip vLLM and flash-attn.
-  VLLM_VERSION=0.11.0
+  INSTALL_FLASH_ATTN=0      Skip flash-attn even when GPU deps are enabled.
+  FLASH_ATTN_REQUIRED=0     Continue if flash-attn fails, useful when GitHub is unstable.
+  VLLM_VERSION=0.8.5.post1
   FLASH_ATTN_VERSION=2.7.4.post1
 EOF
 }
@@ -126,6 +133,17 @@ should_install_gpu_deps() {
   esac
 }
 
+truthy() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|on|ON)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 install_base() {
   if [ ! -d "${REPO_DIR}" ]; then
     echo "Repository not found at ${REPO_DIR}" >&2
@@ -143,7 +161,11 @@ install_base() {
   pip install -U pip setuptools wheel ninja packaging
 
   log "Installing PyTorch ${TORCH_VERSION} from ${TORCH_CUDA_INDEX}"
-  pip install "torch==${TORCH_VERSION}" torchvision torchaudio --index-url "${TORCH_CUDA_INDEX}"
+  pip install \
+    "torch==${TORCH_VERSION}" \
+    "torchvision==${TORCHVISION_VERSION}" \
+    "torchaudio==${TORCHAUDIO_VERSION}" \
+    --index-url "${TORCH_CUDA_INDEX}"
 
   log "Installing SkillRL requirements except flash-attn"
   grep -v -E '^[[:space:]]*flash-attn([=<> ].*)?$' requirements.txt > /tmp/skillrl-requirements-no-flash.txt
@@ -166,10 +188,37 @@ install_gpu_deps() {
   fi
 
   log "Installing vLLM ${VLLM_VERSION}"
-  pip install "vllm==${VLLM_VERSION}"
+  cat > /tmp/skillrl-autodl-constraints.txt <<EOF
+torch==${TORCH_VERSION}
+torchvision==${TORCHVISION_VERSION}
+torchaudio==${TORCHAUDIO_VERSION}
+EOF
+  pip install "vllm==${VLLM_VERSION}" \
+    --constraint /tmp/skillrl-autodl-constraints.txt \
+    --extra-index-url "${TORCH_CUDA_INDEX}"
+
+  if ! truthy "${INSTALL_FLASH_ATTN}"; then
+    log "Skipping flash-attn because INSTALL_FLASH_ATTN=${INSTALL_FLASH_ATTN}"
+    return
+  fi
 
   log "Installing flash-attn ${FLASH_ATTN_VERSION}"
-  MAX_JOBS="${MAX_JOBS}" pip install "flash-attn==${FLASH_ATTN_VERSION}" --no-build-isolation --no-cache-dir
+  set +e
+  if [ -n "${FLASH_ATTN_WHEEL_URL}" ]; then
+    MAX_JOBS="${MAX_JOBS}" pip install --no-cache-dir "${FLASH_ATTN_WHEEL_URL}"
+  else
+    MAX_JOBS="${MAX_JOBS}" pip install "flash-attn==${FLASH_ATTN_VERSION}" --no-build-isolation --no-cache-dir
+  fi
+  flash_status=$?
+  set -e
+
+  if [ "${flash_status}" -ne 0 ]; then
+    if truthy "${FLASH_ATTN_REQUIRED}"; then
+      echo "flash-attn installation failed. Set FLASH_ATTN_REQUIRED=0 to continue without it." >&2
+      exit "${flash_status}"
+    fi
+    log "flash-attn installation failed, continuing because FLASH_ATTN_REQUIRED=${FLASH_ATTN_REQUIRED}"
+  fi
 }
 
 verify_env() {

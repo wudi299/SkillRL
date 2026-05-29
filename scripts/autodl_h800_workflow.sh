@@ -12,6 +12,8 @@ WORK_DIR="${WORK_DIR:-/root/autodl-tmp/skillrl-runs/alfworld_smoke_001}"
 LIMIT="${LIMIT:-1}"
 TRACE_LLM="${TRACE_LLM:-1}"
 INSTALL_GPU_DEPS="${INSTALL_GPU_DEPS:-1}"
+INSTALL_FLASH_ATTN="${INSTALL_FLASH_ATTN:-1}"
+FLASH_ATTN_REQUIRED="${FLASH_ATTN_REQUIRED:-1}"
 MAX_JOBS="${MAX_JOBS:-8}"
 
 log() {
@@ -41,6 +43,8 @@ Useful overrides:
   CONDA_ENVS_DIR=/root/autodl-tmp/envs
   CONDA_ENV_PREFIX=/root/autodl-tmp/envs/skillrl
   INSTALL_GPU_DEPS=1
+  INSTALL_FLASH_ATTN=1
+  FLASH_ATTN_REQUIRED=0
   MAX_JOBS=4
   ROLLOUT_DIR=/root/autodl-tmp/skillrl-data/rollouts/alfworld
   WORK_DIR=/root/autodl-tmp/skillrl-runs/alfworld_smoke_001
@@ -90,7 +94,8 @@ install_env() {
   log "Installing full H800 environment"
   REPO_DIR="${REPO_DIR}" DATA_DIR="${DATA_DIR}" \
     CONDA_ENVS_DIR="${CONDA_ENVS_DIR}" CONDA_ENV_PREFIX="${CONDA_ENV_PREFIX}" \
-    INSTALL_GPU_DEPS="${INSTALL_GPU_DEPS}" MAX_JOBS="${MAX_JOBS}" \
+    INSTALL_GPU_DEPS="${INSTALL_GPU_DEPS}" INSTALL_FLASH_ATTN="${INSTALL_FLASH_ATTN}" \
+    FLASH_ATTN_REQUIRED="${FLASH_ATTN_REQUIRED}" MAX_JOBS="${MAX_JOBS}" \
     bash scripts/prepare_autodl_env.sh full
 }
 
