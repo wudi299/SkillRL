@@ -62,6 +62,17 @@ export WORK_DIR=/root/autodl-tmp/skillrl-runs/alfworld_smoke_001
 LIMIT=3 TRACE_LLM=1 bash scripts/run_alfworld_audit_pipeline.sh
 ```
 
+If you do not have ALFWorld rollout files yet, generate a tiny expert rollout
+first. This does not call an LLM:
+
+```bash
+python scripts/generate_alfworld_rollouts.py \
+  --output_dir /root/autodl-tmp/skillrl-data/rollouts/alfworld \
+  --env_num 1 \
+  --trajs_per_env 1 \
+  --max_steps 50
+```
+
 The same smoke run can also be launched through the AutoDL wrapper:
 
 ```bash

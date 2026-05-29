@@ -79,7 +79,8 @@ python "${SFT_DIR}/preprocess/parse_alfworld.py" \
   --output_file "$(stage_dir 01_processed)/processed_trajectories.json" \
   --n_success_envs "${LIMIT}" \
   --n_fail_envs "${LIMIT}" \
-  --n_trajs_per_env 1
+  --n_trajs_per_env 1 \
+  --min_trajs_per_env 1
 
 python "${ARTIFACTS}" sample-json \
   --input "$(stage_dir 01_processed)/processed_trajectories.json" \
