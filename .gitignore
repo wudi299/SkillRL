@@ -33,6 +33,7 @@ skillrl-runs/
 
 # Local AutoDL helpers
 autodl_sync.sh
+AGENTS.md
 
 # Python and local environments
 __pycache__/
