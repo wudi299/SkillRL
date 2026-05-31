@@ -32,6 +32,18 @@ def dump_json(data: Any, path: str) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+def openai_client_kwargs() -> dict[str, str]:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise SystemExit("Set OPENAI_API_KEY in the environment.")
+
+    kwargs = {"api_key": api_key}
+    base_url = os.environ.get("OPENAI_BASE_URL")
+    if base_url:
+        kwargs["base_url"] = base_url.rstrip("/")
+    return kwargs
+
+
 def append_jsonl(record: dict[str, Any], path: str) -> None:
     ensure_dir(os.path.dirname(os.path.abspath(path)))
     with open(path, "a", encoding="utf-8") as f:

@@ -84,6 +84,12 @@ def parse_trajectory_file(file_path: str) -> dict:
         done = header_match.group(4) == "True"
 
         obs_raw = segment[header_match.end() :].strip()
+        # Model-generated rollout files may include per-step metadata such as
+        # raw model output before the observation. Keep the parser focused on
+        # the environment observation so memory/SFT generation is not polluted.
+        obs_marker = "\nObs:"
+        if obs_marker in obs_raw and not obs_raw.startswith("Obs:"):
+            obs_raw = obs_raw[obs_raw.index(obs_marker) + 1 :]
         if obs_raw.startswith("Obs:"):
             obs_raw = obs_raw[4:].strip()
 

@@ -53,7 +53,7 @@ from openai import OpenAI
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from audit_utils import JsonlTraceLogger, truthy  # noqa: E402
+from audit_utils import JsonlTraceLogger, openai_client_kwargs, truthy  # noqa: E402
 from skill_retrieval import classify_alfworld_task, format_skills_block, load_skill_bank  # noqa: E402
 
 ALFWORLD_SYSTEM_TEMPLATE = """You are an expert agent operating in the ALFRED Embodied Environment.
@@ -329,10 +329,7 @@ def main():
     parser.add_argument("--trace_llm", action="store_true", help="Write full LLM traces to artifact_dir/llm_calls.jsonl.")
     args = parser.parse_args()
 
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise SystemExit("Set OPENAI_API_KEY in the environment.")
-    client = OpenAI(api_key=api_key)
+    client = OpenAI(**openai_client_kwargs())
 
     rng = random.Random(args.seed)
     skill_bank = load_skill_bank(args.skill_bank_file)

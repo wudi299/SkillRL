@@ -30,7 +30,7 @@ import uuid
 from openai import OpenAI
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from audit_utils import JsonlTraceLogger, truthy  # noqa: E402
+from audit_utils import JsonlTraceLogger, openai_client_kwargs, truthy  # noqa: E402
 
 PRICE_INPUT = 0.00125 / 1000
 PRICE_OUTPUT = 0.0100 / 1000
@@ -230,10 +230,7 @@ def main():
     parser.add_argument("--trace_llm", action="store_true", help="Write full LLM traces to artifact_dir/llm_calls.jsonl.")
     args = parser.parse_args()
 
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise SystemExit("Set OPENAI_API_KEY in the environment.")
-    client = OpenAI(api_key=api_key)
+    client = OpenAI(**openai_client_kwargs())
 
     with open(args.input_file, "r", encoding="utf-8") as f:
         entries = json.load(f)
